@@ -1,4 +1,4 @@
-import type { Claim, EvidenceRecord, ResearchRun } from "./types.js";
+import type { Claim, ResearchRun } from "./types.js";
 
 /**
  * Source retrieval abstraction. Implementations MUST:
