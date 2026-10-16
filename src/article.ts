@@ -1,6 +1,48 @@
+import { BlockList, isIP } from "node:net";
 import type { ArticleRecord } from "./types.js";
 
-/** Article registration with strict URL validation (SSRF first line of defense). */
+const BLOCKED_IP_RANGES = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["192.88.99.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4],
+] as const) {
+  BLOCKED_IP_RANGES.addSubnet(network, prefix, "ipv4");
+}
+for (const [network, prefix] of [
+  ["::", 128],
+  ["::1", 128],
+  ["::", 96],
+  ["::ffff:0:0", 96],
+  ["64:ff9b::", 96],
+  ["64:ff9b:1::", 48],
+  ["100::", 64],
+  ["2001::", 23],
+  ["2001:db8::", 32],
+  ["2002::", 16],
+  ["fc00::", 7],
+  ["fe80::", 10],
+  ["fec0::", 10],
+  ["ff00::", 8],
+] as const) {
+  BLOCKED_IP_RANGES.addSubnet(network, prefix, "ipv6");
+}
+
+const cloneArticle = (article: ArticleRecord): ArticleRecord => ({ ...article });
+
+/** Article registration with strict URL syntax validation (not a transport/SSRF guarantee). */
 export class ArticleRegistry {
   private articles = new Map<string, ArticleRecord>();
 
@@ -16,68 +58,63 @@ export class ArticleRegistry {
     };
     if (this.articles.has(record.id)) throw new Error(`Duplicate article id: ${record.id}`);
     this.articles.set(record.id, record);
-    return record;
+    return cloneArticle(record);
   }
 
   get(id: string): ArticleRecord | undefined {
-    return this.articles.get(id);
+    const article = this.articles.get(id);
+    return article ? cloneArticle(article) : undefined;
   }
 
   list(): ArticleRecord[] {
-    return [...this.articles.values()];
+    return [...this.articles.values()].map(cloneArticle);
   }
 }
 
 /**
- * SSRF guard for retrieval workers. Enforces http(s), bans private/loopback/
- * link-local/reserved ranges and non-standard ports. Default-deny.
- * KNOWN GAP: hostname-based URLs must be resolved via DNS and the resulting
- * IP re-checked before connecting; see HANDOFF_TO_MANUS.md.
+ * Syntactic URL guard only. A real transport must resolve every redirect hop,
+ * reject every non-public A/AAAA answer, and pin the validated address for the
+ * actual connection; this function alone does not prevent DNS rebinding.
  */
 export function requirePublicHttpUrl(raw: string): string {
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    throw new Error("Invalid URL");
+    throw new Error("Invalid source URL");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(`Blocked: only http(s) URLs are allowed (got ${url.protocol})`);
+    throw new Error("Blocked source URL: only HTTP and HTTPS are supported");
   }
   if (url.username || url.password) {
-    throw new Error("Blocked: credentials in URL are not allowed");
+    throw new Error("Blocked source URL: credentials are not allowed");
   }
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (isBlockedHost(host)) {
-    throw new Error(`Blocked: host resolves to a private or reserved address range (${host})`);
-  }
-  if (url.port && !["", "80", "443"].includes(url.port)) {
-    throw new Error(`Blocked: non-standard port ${url.port}`);
+
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (isBlockedHost(host)) throw new Error("Blocked source URL: destination is not public");
+
+  const expectedPort = url.protocol === "https:" ? "443" : "80";
+  if (url.port && url.port !== expectedPort) {
+    throw new Error("Blocked source URL: non-standard port");
   }
   return url.toString();
 }
 
 export function isBlockedHost(host: string): boolean {
-  if (!host) return true;
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return true;
-  if (host.includes("@")) return true;
-  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (ipv4) {
-    const o = ipv4.slice(1).map(Number);
-    if (o.some((n) => n > 255)) return true;
-    const [a, b] = [o[0]!, o[1]!];
-    if (a === 0 || a === 10 || a === 127) return true; // this-network, private, loopback
-    if (a === 169 && b === 254) return true; // link-local incl. cloud metadata 169.254.169.254
-    if (a === 172 && b >= 16 && b <= 31) return true; // private
-    if (a === 192 && b === 168) return true; // private
-    if (a >= 224) return true; // multicast/reserved
-    return false;
+  const normalized = host.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (!normalized) return true;
+  if (
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost") ||
+    normalized.endsWith(".local") ||
+    normalized.endsWith(".internal")
+  ) {
+    return true;
   }
-  // IPv6: block ::, ::1, link-local, unique-local. A robust implementation must
-  // resolve and re-check post-DNS; noted as limitation in HANDOFF_TO_MANUS.md.
-  if (host.includes(":")) {
-    const h = host.toLowerCase();
-    if (h === "::" || h === "::1" || h.startsWith("fe80:") || h.startsWith("fc") || h.startsWith("fd")) return true;
-  }
+  if (normalized.includes("@")) return true;
+
+  const family = isIP(normalized);
+  if (family === 4) return BLOCKED_IP_RANGES.check(normalized, "ipv4");
+  if (family === 6) return BLOCKED_IP_RANGES.check(normalized, "ipv6");
   return false;
 }
