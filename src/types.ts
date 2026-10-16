@@ -101,5 +101,7 @@ export interface EditorialApproval {
   approverId: string;
   targetId: string;
   targetType: "evidence-report" | "candidate-faq";
+  /** SHA-256 of the exact typed editorial content approved by the editor. */
+  revisionHash: string;
   approvedAt: string;
 }
