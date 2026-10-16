@@ -14,7 +14,7 @@
 
 - Added `package-lock.json`, TypeScript ESLint flat config, maintained ESLint 10 / typescript-eslint development dependencies, removed an unused type import flagged by the new lint rules, and restricted CI permissions to `contents: read`.
 - **Locally verified:** `npm ci`, `npm run lint`, `npm run typecheck`, `npm test` (4 files / 29 tests), `npm run build`, and `npm audit --omit=dev --audit-level=moderate` all pass; audit reported zero production dependency vulnerabilities.
-- These are local results only. No Actions run on the audit branch has been observed yet.
+- **Actual GitHub Actions:** PR [#6](https://github.com/remRADAR/article-intelligence-discussion/pull/6), run [38878714961](https://github.com/remRADAR/article-intelligence-discussion/actions/runs/38878714961), passed all workflow steps on commit `c0d861be1009ad106b8d301a67500b4dd93fa6e6`.
 
 ## Security findings
 
@@ -25,4 +25,4 @@
 
 ## Status and next gate
 
-**BLOCKED.** Local lint/type/test/build gates pass on the audit branch, but SSRF-safe retrieval is not implemented and approval is not revision-bound. No post-change GitHub Actions result exists. No package was published, no external URL was fetched by the package, and no production system was accessed. A retrieval implementation and independent security review are required before enabling outbound source fetch or public publication.
+**BLOCKED.** Local and PR Actions lint/type/test/build gates pass, but SSRF-safe retrieval is not implemented and approval is not revision-bound. PR #6 is open for review and has not been merged. No package was published, no external URL was fetched by the package, and no production system was accessed. A retrieval implementation and independent security review are required before enabling outbound source fetch or public publication.
