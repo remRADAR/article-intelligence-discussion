@@ -25,3 +25,7 @@ No new environment variables, permissions, or credentials are introduced. NairaL
 ## Verification
 
 NairaLeap's focused Cypress spec verifies the status notice appears and exposes no submission controls. Network retrieval, DNS/redirect safety, authorization, approval freshness, persistence, moderation, and public discussion are not implemented or tested here.
+
+## CI and lockfile prerequisite
+
+This stacked documentation PR targets `audit/stage-2-quality-gates`, which carries the committed `package-lock.json`. The quality-gate workflow now includes that base branch as a pull-request target so a fresh `npm ci` verification can run against the lockfile.
